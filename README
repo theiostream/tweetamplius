@@ -1,0 +1,17 @@
+TweetAmplius (for Twitter and Tweetbot)
+by theiostream & AAouiz
+
+Tweet longer tweets that get posted on pastie.org, DMs are split into many and sent.
+
+COMPATIBILITY:
+Check compatibility note inside Tweak.xm
+
+CREDITS:
+- App decryption through stefanesser/dumpdecrypted
+- pastie.py by Hector Martin was studied for the pastie.org API
+- Instapaper Mobilizer
+- tinyurl.com API
+
+LICENSE:
+(c) 2013 Colégio Visconde de Porto Seguro
+Licensed under the WTFPLv3 (http://theiostream.github.com/wtfpl/LICENSE.txt)

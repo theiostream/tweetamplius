@@ -1,0 +1,1 @@
+{ Filter = { Bundles = ( "com.tapbots.Tweetbot", "com.tapbots.TweetbotPad", "com.atebits.Tweetie2" ); }; }
