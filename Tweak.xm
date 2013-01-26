@@ -61,14 +61,17 @@ static NSURLRequest *TBPastieRequest(NSString *text) {
 	return (NSURLRequest *)request;
 }
 
-static NSString *TBInstapaperMobilize(NSString *pastie) {
+typedef void (^TBInstapaperMobilizeCompletionHandler)(NSString *);
+static void TBInstapaperMobilize(NSString *pastie, TBInstapaperMobilizeCompletionHandler completion) {
+	NSLog(@"mobilizing");
 	NSString *number = [[pastie componentsSeparatedByString:@"/"] lastObject];
 	NSString *pastie_raw = [NSString stringWithFormat:@"http://pastie.org/pastes/%@/text", number];
 	NSString *instapaper = [NSString stringWithFormat:@"http://instapaper.com/m?u=%@", NSStringURLEncode(pastie_raw)];
 	
 	NSURLRequest *request = [NSURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"http://tinyurl.com/api-create.php?url=%@", instapaper]]];
-	NSData *data = [NSURLConnection sendSynchronousRequest:request returningResponse:nil error:NULL];
-	return [NSString stringWithUTF8String:(const char *)[data bytes]];
+	[NSURLConnection sendAsynchronousRequest:request queue:[NSOperationQueue currentQueue] completionHandler:^(NSURLResponse *response, NSData *data, NSError *error){
+		completion([NSString stringWithUTF8String:(const char *)[data bytes]]);
+	}];
 }
 
 static void TBLimitTweet(NSUInteger limitIndex, NSString *text, NSString **limit, NSString **rest) {
@@ -157,11 +160,12 @@ static UILabel *tweetbotCounter = nil;
 		
 		NSURLRequest *request = TBPastieRequest(text);
 		[NSURLConnection sendAsynchronousRequest:request queue:[NSOperationQueue currentQueue] completionHandler:^(NSURLResponse *response, NSData *data, NSError *error){
-			NSString *pastie_link = TBInstapaperMobilize([[response URL] absoluteString]);
-			NSString *res = [before_pastie stringByAppendingString:[@"... " stringByAppendingString:pastie_link]];
-			
-			[*draft setText:res];
-			[self post:sender];
+			TBInstapaperMobilize([[response URL] absoluteString], ^(NSString *pastie_link){
+				NSString *res = [before_pastie stringByAppendingString:[@"... " stringByAppendingString:pastie_link]];
+				
+				[*draft setText:res];
+				[self post:sender];
+			});
 		}];
 	}
 	else %orig;
@@ -417,15 +421,17 @@ static BOOL theiostream_in_the_house = NO;
 	}
 	
 	else {
+		NSLog(@"HI TWITTER");
 		if (remaining < 0) {
 			NSString *limited;
 			TBLimitTweet(116, text, &limited, NULL);
 			
 			NSURLRequest *request = TBPastieRequest(text);
 			[NSURLConnection sendAsynchronousRequest:request queue:[NSOperationQueue currentQueue] completionHandler:^(NSURLResponse *response, NSData *data, NSError *error){
-				NSString *pastie_link = TBInstapaperMobilize([[response URL] absoluteString]);
-				[self setText:[limited stringByAppendingString:[@"... " stringByAppendingString:pastie_link]]];
-				[self sendFromAccount:account];
+				TBInstapaperMobilize([[response URL] absoluteString], ^(NSString *pastie_link){
+					[self setText:[limited stringByAppendingString:[@"... " stringByAppendingString:pastie_link]]];
+					[self sendFromAccount:account];
+				});
 			}];
 		}
 		else %orig;
