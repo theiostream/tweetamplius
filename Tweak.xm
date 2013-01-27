@@ -68,7 +68,7 @@ static void TBInstapaperMobilize(NSString *pastie, TBInstapaperMobilizeCompletio
 	NSString *pastie_raw = [NSString stringWithFormat:@"http://pastie.org/pastes/%@/text", number];
 	NSString *instapaper = [NSString stringWithFormat:@"http://instapaper.com/m?u=%@", NSStringURLEncode(pastie_raw)];
 	
-	NSURLRequest *request = [NSURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"http://tinyurl.com/api-create.php?url=%@", instapaper]]];
+	NSURLRequest *request = [NSURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"http://is.gd/create.php?format=simple&url=%@", instapaper]]];
 	[NSURLConnection sendAsynchronousRequest:request queue:[NSOperationQueue currentQueue] completionHandler:^(NSURLResponse *response, NSData *data, NSError *error){
 		completion([NSString stringWithUTF8String:(const char *)[data bytes]]);
 	}];
