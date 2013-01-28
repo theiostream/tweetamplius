@@ -70,7 +70,12 @@ static void TBInstapaperMobilize(NSString *pastie, TBInstapaperMobilizeCompletio
 	
 	NSURLRequest *request = [NSURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"http://is.gd/create.php?format=simple&url=%@", instapaper]]];
 	[NSURLConnection sendAsynchronousRequest:request queue:[NSOperationQueue currentQueue] completionHandler:^(NSURLResponse *response, NSData *data, NSError *error){
-		completion([NSString stringWithUTF8String:(const char *)[data bytes]]);
+		NSLog(@"is.gd reply: %@", [NSString stringWithUTF8String:(const char *)[data bytes]]);
+		
+		if (data != nil)
+			completion([NSString stringWithUTF8String:(const char *)[data bytes]]);
+		else
+			completion(instapaper);
 	}];
 }
 
@@ -150,22 +155,50 @@ static UILabel *tweetbotCounter = nil;
 - (void)post:(id)sender {
 	PTHTweetbotPostDraft **draft = &MSHookIvar<PTHTweetbotPostDraft *>(self, "_draft");
 	NSString *text = [[*draft text] retain];
+	NSLog(@"text is %@ %i %i", text, [text length], [*draft length]);
+	
+	/*if ([text length] < [*draft length]) {
+		if ([text length] > 140)
+	else
+		if ([*draft length] > 140)*/
 	
 	if ([*draft length] > 140) {
 		NSString *before_pastie;
-		TBLimitTweet(116, text, &before_pastie, NULL);
+		
+		NSInteger limit = 116;
+		limit -= 20*([[*draft mediaArray] count]) + 3;
+		NSLog(@"limit is %i (%i)", limit, [[*draft mediaArray] count]);
+		
+		TBLimitTweet(limit, text, &before_pastie, NULL);
+		NSLog(@"before_pastie = %@", before_pastie);
 		
 		// Unfortunately using this hooking way we are unable to completely cooperate with Tweetbot's "Post In Background" feature.
 		[[self navigationItem] setRightBarButtonItem:[%c(UIBarButtonItem) rightSpinnerItemWithWidth:24.f]];
 		
 		NSURLRequest *request = TBPastieRequest(text);
 		[NSURLConnection sendAsynchronousRequest:request queue:[NSOperationQueue currentQueue] completionHandler:^(NSURLResponse *response, NSData *data, NSError *error){
-			TBInstapaperMobilize([[response URL] absoluteString], ^(NSString *pastie_link){
-				NSString *res = [before_pastie stringByAppendingString:[@"... " stringByAppendingString:pastie_link]];
+			if (data != nil) {
+				NSLog(@"paste: %@", [[response URL] absoluteString]);
 				
-				[*draft setText:res];
-				[self post:sender];
-			});
+				TBInstapaperMobilize([[response URL] absoluteString], ^(NSString *pastie_link){
+					NSLog(@"pastie_link = %@", pastie_link);
+					NSString *res = [before_pastie stringByAppendingString:[@"... " stringByAppendingString:pastie_link]];
+					if ([[*draft mediaArray] count] > 0) res = [res stringByAppendingString:@":"];
+					
+					[*draft setText:res];
+					[self post:sender];
+				});
+			}
+			
+			else {
+				[self dismissViewControllerAnimated:YES completion:^{
+					UIAlertView *failed = [[[%c(UIAlertView) alloc] init] autorelease];
+					[failed setTitle:@"TweetAmplius"];
+					[failed setMessage:@"Request to pastie.org has failed."];
+					[failed addButtonWithTitle:@"Dismiss"];
+					[failed show];
+				}];
+			}
 		}];
 	}
 	else %orig;
@@ -285,6 +318,7 @@ static BOOL theiostream_in_the_house = NO;
 - (NSInteger)remainingCharactersForAccount:(id)account;
 - (void)setDirectMessageUser:(id)user;
 - (id)directMessageUser;
+- (int)attachmentsLengthForAccount:(id)account;
 @end
 
 %group TBTwitter
@@ -399,7 +433,7 @@ static BOOL theiostream_in_the_house = NO;
 	%log;
 	NSString *text = [self text];
 	theiostream_in_the_house = YES;
-	NSInteger remaining = [self remainingCharactersForAccount:account];
+	NSInteger remaining = [self remainingCharactersForAccount:account];// + [self attachmentsLengthForAccount:account];
 	theiostream_in_the_house = NO;
 	
 	if ([self isDirectMessage]) {
@@ -424,14 +458,31 @@ static BOOL theiostream_in_the_house = NO;
 		NSLog(@"HI TWITTER");
 		if (remaining < 0) {
 			NSString *limited;
-			TBLimitTweet(116, text, &limited, NULL);
+			
+			NSLog(@"THIS BETTER BE NULL %@", [self attachment]);
+			TBLimitTweet(([self attachment] ? 93 : 116), text, &limited, NULL);
 			
 			NSURLRequest *request = TBPastieRequest(text);
 			[NSURLConnection sendAsynchronousRequest:request queue:[NSOperationQueue currentQueue] completionHandler:^(NSURLResponse *response, NSData *data, NSError *error){
-				TBInstapaperMobilize([[response URL] absoluteString], ^(NSString *pastie_link){
-					[self setText:[limited stringByAppendingString:[@"... " stringByAppendingString:pastie_link]]];
-					[self sendFromAccount:account];
-				});
+				NSLog(@"k %@", [[response URL] absoluteString]);
+				if (data != nil) {
+					TBInstapaperMobilize([[response URL] absoluteString], ^(NSString *pastie_link){
+						NSString *res = [limited stringByAppendingString:[@"... " stringByAppendingString:pastie_link]];
+						if ([self attachment]) res = [res stringByAppendingString:@":"];
+						NSLog(@"res = %@", res);
+						[self setText:res];
+						
+						[self sendFromAccount:account];
+					});
+				}
+				
+				else {
+					UIAlertView *failed = [[[%c(UIAlertView) alloc] init] autorelease];
+					[failed setTitle:@"TweetAmplius"];
+					[failed setMessage:@"Request to pastie.org has failed."];
+					[failed addButtonWithTitle:@"Dismiss"];
+					[failed show];
+				}
 			}];
 		}
 		else %orig;
