@@ -1,1 +1,1 @@
-{ Filter = { Bundles = ( "com.tapbots.Tweetbot", "com.tapbots.TweetbotPad", "com.atebits.Tweetie2" ); }; }
+{ Filter = { Bundles = ( "com.tapbots.Tweetbot", "com.tapbots.TweetbotPad", "com.atebits.Tweetie2", "com.tapbots.Tweetbot3" ); }; }

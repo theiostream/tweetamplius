@@ -26,9 +26,12 @@ ever, Tweetbot for iPhone is awesome and the iPad version is getting there. :P
 
 /*================ SHARED */
 
-// From Cocoanetics (s/&amp/&)
+#define Twitter6x() ([[[[NSBundle mainBundle] infoDictionary] objectForKey:(NSString *)kCFBundleVersionKey] compare:@"6.0" options:NSNumericSearch] != NSOrderedAscending)
+static BOOL isTweetbot3 = NO;
+
+/* Shared {{{ */
 static NSString *NSStringURLEncode(NSString *string) {
-	return (NSString *)CFURLCreateStringByAddingPercentEscapes(NULL, (CFStringRef)string, NULL, CFSTR("!*'();:@&=+$,/?%#[]"), kCFStringEncodingUTF8);
+	return [(NSString *)CFURLCreateStringByAddingPercentEscapes(NULL, (CFStringRef)string, NULL, CFSTR("!*'();:@&=+$,/?%#[]"), kCFStringEncodingUTF8) autorelease];
 }
 
 static NSString *NSDictionaryURLEncode(NSDictionary *dict) {
@@ -65,17 +68,24 @@ typedef void (^TBInstapaperMobilizeCompletionHandler)(NSString *);
 static void TBInstapaperMobilize(NSString *pastie, TBInstapaperMobilizeCompletionHandler completion) {
 	NSLog(@"mobilizing");
 	NSString *number = [[pastie componentsSeparatedByString:@"/"] lastObject];
-	NSString *pastie_raw = [NSString stringWithFormat:@"http://pastie.org/pastes/%@/text", number];
+	NSString *pastie_raw = [NSString stringWithFormat:@"http://pastie.org/pastes/%@/download", number];
 	NSString *instapaper = [NSString stringWithFormat:@"http://instapaper.com/m?u=%@", NSStringURLEncode(pastie_raw)];
 	
 	NSURLRequest *request = [NSURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"http://is.gd/create.php?format=simple&url=%@", instapaper]]];
 	[NSURLConnection sendAsynchronousRequest:request queue:[NSOperationQueue currentQueue] completionHandler:^(NSURLResponse *response, NSData *data, NSError *error){
-		NSLog(@"is.gd reply: %@", [NSString stringWithUTF8String:(const char *)[data bytes]]);
+		NSString *replyString;
+		if (data == nil) goto inst;
+		replyString = [NSString stringWithUTF8String:(const char *)[data bytes]];
 		
-		if (data != nil)
-			completion([NSString stringWithUTF8String:(const char *)[data bytes]]);
-		else
+		if (replyString != nil) {
+			NSLog(@"completion(replyString = %@)", replyString);
+			completion(replyString);
+		}
+		else {
+			inst:
+			NSLog(@"completion(instapaper = %@)", instapaper);
 			completion(instapaper);
+		}
 	}];
 }
 
@@ -86,7 +96,7 @@ static void TBLimitTweet(NSUInteger limitIndex, NSString *text, NSString **limit
 	
 	NSInteger index = limitIndex-1;
 	while (index >= 0) {
-		NSLog(@"index is %i run", index);
+		//NSLog(@"index is %i run", index);
 		char whitespace = [*limit characterAtIndex:index];
 		if (whitespace == ' ' || whitespace == '\t') break;
 		
@@ -94,16 +104,17 @@ static void TBLimitTweet(NSUInteger limitIndex, NSString *text, NSString **limit
 	}
 	if (index == -1) index = limitIndex;
 	
-	NSLog(@"index ended up as %i", index);
+	//NSLog(@"index ended up as %i", index);
 	*limit = [*limit substringToIndex:index];
-	NSLog(@"kool");
+	//NSLog(@"kool");
 	
 	if (rest != NULL)
 		*rest = [text substringFromIndex:index+1];
 	NSLog(@"she's leaving home bye bye");
 }
+/* }}} */
 
-/*================ TWEETBOT */
+/* Tweetbot {{{ */
 
 @interface UIBarButtonItem (PTHTweetbotShitCategory)
 + (UIBarButtonItem *)rightSpinnerItemWithWidth:(CGFloat)width;
@@ -125,6 +136,7 @@ static void TBLimitTweet(NSUInteger limitIndex, NSString *text, NSString **limit
 - (void)setText:(NSString *)text;
 - (BOOL)isPosting;
 - (NSUInteger)length;
+- (NSArray *)mediaArray;
 @end
 
 @interface PTHTweetbotDirectMessagesController : UIViewController
@@ -173,7 +185,20 @@ static UILabel *tweetbotCounter = nil;
 		NSLog(@"before_pastie = %@", before_pastie);
 		
 		// Unfortunately using this hooking way we are unable to completely cooperate with Tweetbot's "Post In Background" feature.
-		[[self navigationItem] setRightBarButtonItem:[%c(UIBarButtonItem) rightSpinnerItemWithWidth:24.f]];
+		if (!isTweetbot3) {
+			[[self navigationItem] setRightBarButtonItem:[%c(UIBarButtonItem) rightSpinnerItemWithWidth:24.f]];
+		}
+		else {
+			// Since Tweetbot 3 no longer ships with a spinner, and we can't just push this into the background atm
+			// (well we could, but... :P) we'll just push this one.
+			UIActivityIndicatorView *indicator = [[%c(UIActivityIndicatorView) alloc] initWithFrame:CGRectMake(0, 0, 20, 20)];
+			[indicator setColor:[%c(UIColor) grayColor]];
+			UIBarButtonItem *barButton = [[%c(UIBarButtonItem) alloc] initWithCustomView:indicator];
+			[[self navigationItem] setRightBarButtonItem:barButton];
+			[barButton release];
+			[indicator startAnimating];
+			[indicator release];
+		}
 		
 		NSURLRequest *request = TBPastieRequest(text);
 		[NSURLConnection sendAsynchronousRequest:request queue:[NSOperationQueue currentQueue] completionHandler:^(NSURLResponse *response, NSData *data, NSError *error){
@@ -210,19 +235,26 @@ static UILabel *tweetbotCounter = nil;
 %hook PTHTweetbotDirectMessagesController
 - (id)initWithDirectMessageThread:(id)thread {
 	if ((self = %orig)) tweetbotDMController = self;
+	NSLog(@"tweetbotDMController = %@", tweetbotDMController);
 	return self;
 }
 
 - (void)loadView {
 	%orig;
-	tweetbotDMSender = MSHookIvar<UIButton *>(self, "_sendButton");
-	tweetbotDMCounter = MSHookIvar<UILabel *>(self, "_counterLabel");
+	
+	if (!isTweetbot3) {
+		tweetbotDMSender = MSHookIvar<UIButton *>(self, "_sendButton");
+		tweetbotDMCounter = MSHookIvar<UILabel *>(self, "_counterLabel");
+	}
 }
 
 - (void)dealloc {
 	tweetbotDMController = nil;
-	tweetbotDMSender = nil;
-	tweetbotDMCounter = nil;
+	
+	if (!isTweetbot3) {
+		tweetbotDMSender = nil;
+		tweetbotDMCounter = nil;
+	}
 	
 	%orig;
 }
@@ -258,7 +290,7 @@ static UILabel *tweetbotCounter = nil;
 	[*draft release];
 	PTHTweetbotPostDraft *finalDraft = [[%c(PTHTweetbotPostDraft) alloc] initWithToUser:toUser];
 	[finalDraft setPosting:posting];
-	[finalDraft setText:[MSHookIvar<UITextView *>(self, "_textView") text]];
+	[finalDraft setText:[MSHookIvar<UITextView *>(self, isTweetbot3 ? "_messageTextView" : "_textView") text]];
 	*draft = finalDraft;
 	
 	[toUser release];
@@ -266,10 +298,32 @@ static UILabel *tweetbotCounter = nil;
 }
 %end
 
+%hook PTHTweetbotDirectMessageTextView
+- (id)initWithFrame:(CGRect)frame {
+	if ((self = %orig)) {
+		if (isTweetbot3) {
+			tweetbotDMSender = MSHookIvar<UIButton *>(self, "_sendButton");
+			tweetbotDMCounter = MSHookIvar<UILabel *>(self, "_counterLabel");
+		}
+	}
+
+	return self;
+}
+
+- (void)dealloc {
+	if (isTweetbot3) {
+		tweetbotDMSender = nil;
+		tweetbotDMCounter = nil;
+	}
+
+	%orig;
+}
+%end
+
 %hook UIButton
 - (void)setEnabled:(BOOL)enabled {
 	if (self == tweetbotDMSender && !enabled) {
-		if (![[MSHookIvar<UITextView *>(tweetbotDMController, "_textView") text] isEqualToString:@""]) {
+		if (![[MSHookIvar<UITextView *>(tweetbotDMController, isTweetbot3 ? "_messageTextView" : "_textView") text] isEqualToString:@""]) {
 			if ([self isEnabled]) return;
 			else { [self setEnabled:YES]; return; }
 		}
@@ -299,7 +353,9 @@ static UILabel *tweetbotCounter = nil;
 %end
 %end
 
-/*================ TWITTER */
+/* }}} */
+
+/* Twitter {{{ */
 
 static UIViewController *conversationViewController = nil;
 static UIViewController *composeViewController = nil;
@@ -319,6 +375,7 @@ static BOOL theiostream_in_the_house = NO;
 - (void)setDirectMessageUser:(id)user;
 - (id)directMessageUser;
 - (int)attachmentsLengthForAccount:(id)account;
+- (id)attachment;
 @end
 
 %group TBTwitter
@@ -368,11 +425,18 @@ static BOOL theiostream_in_the_house = NO;
 
 - (void)viewDidLoad {
 	%orig;
-	sendButton = MSHookIvar<UIBarButtonItem *>(self, "sendButton");
+	
+	sendButton = MSHookIvar<UIBarButtonItem *>(self, Twitter6x() ? "sendButtonItem" : "sendButton");
 	[sendButton setEnabled:NO];
 }
 
 - (void)_setupCounter {
+	%orig;
+	counterLabel = MSHookIvar<UILabel *>(self, "remainingCharactersLabel");
+}
+
+- (void)_setupPadCounter {
+	%log;
 	%orig;
 	counterLabel = MSHookIvar<UILabel *>(self, "remainingCharactersLabel");
 }
@@ -426,14 +490,20 @@ static BOOL theiostream_in_the_house = NO;
 + (UIColor *)textColorForRemainingCharacterCount:(NSInteger)count {
 	return %orig(140);
 }
+
++ (UIColor *)twitterTextColorForRemainingCharacterCount:(int)remainingCharacterCount light:(BOOL)light {
+	return %orig(140, light);
+}
 %end
 
 %hook TwitterComposition
 - (void)sendFromAccount:(id)account {
 	%log;
 	NSString *text = [self text];
+	NSLog(@"TEXT: %@", text);
 	theiostream_in_the_house = YES;
 	NSInteger remaining = [self remainingCharactersForAccount:account];// + [self attachmentsLengthForAccount:account];
+	NSLog(@"Remaining = %d (textlen = %d)", remaining, [text length]);
 	theiostream_in_the_house = NO;
 	
 	if ([self isDirectMessage]) {
@@ -460,16 +530,17 @@ static BOOL theiostream_in_the_house = NO;
 			NSString *limited;
 			
 			NSLog(@"THIS BETTER BE NULL %@", [self attachment]);
-			TBLimitTweet(([self attachment] ? 93 : 116), text, &limited, NULL);
+			TBLimitTweet(([self attachment] ? 93 : 116) - (Twitter6x() ? 3 : 0), text, &limited, NULL);
 			
 			NSURLRequest *request = TBPastieRequest(text);
 			[NSURLConnection sendAsynchronousRequest:request queue:[NSOperationQueue currentQueue] completionHandler:^(NSURLResponse *response, NSData *data, NSError *error){
 				NSLog(@"k %@", [[response URL] absoluteString]);
 				if (data != nil) {
 					TBInstapaperMobilize([[response URL] absoluteString], ^(NSString *pastie_link){
+						NSLog(@"pastie_link = %@", pastie_link);
 						NSString *res = [limited stringByAppendingString:[@"... " stringByAppendingString:pastie_link]];
+						NSLog(@"got res! %@ %d", res, [res length]);
 						if ([self attachment]) res = [res stringByAppendingString:@":"];
-						NSLog(@"res = %@", res);
 						[self setText:res];
 						
 						[self sendFromAccount:account];
@@ -498,13 +569,16 @@ static BOOL theiostream_in_the_house = NO;
 }
 %end
 %end
+/* }}} */
 
 %ctor {
 	NSAutoreleasePool *pool = [NSAutoreleasePool new];
 	
 	NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-	if ([bundleID isEqualToString:@"com.tapbots.Tweetbot"] || [bundleID isEqualToString:@"com.tapbots.TweetbotPad"])
+	if ([bundleID isEqualToString:@"com.tapbots.Tweetbot"] || [bundleID isEqualToString:@"com.tapbots.TweetbotPad"] || [bundleID isEqualToString:@"com.tapbots.Tweetbot3"]) {
+		isTweetbot3 = [bundleID isEqualToString:@"com.tapbots.Tweetbot3"];
 		%init(TBTweetbot);
+	}
 	else if ([bundleID isEqualToString:@"com.atebits.Tweetie2"])
 		%init(TBTwitter);
 	
