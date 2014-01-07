@@ -6,9 +6,10 @@
 %%%%%*/
 
 // COMPATIBILITY:
-// Twitter 5.x+
+// Twitter 5.x / 6.x (UI Bugs!)
 // Tweetbot 2.6.2 (untested on previous versions)
 // Tweetbot for iPad 2.6.2
+// Tweetbot 3.0 (NOT REALLY)
 
 /*
 A small note on compatibility:
@@ -28,6 +29,8 @@ ever, Tweetbot for iPhone is awesome and the iPad version is getting there. :P
 
 #define Twitter6x() ([[[[NSBundle mainBundle] infoDictionary] objectForKey:(NSString *)kCFBundleVersionKey] compare:@"6.0" options:NSNumericSearch] != NSOrderedAscending)
 static BOOL isTweetbot3 = NO;
+
+static NSOperationQueue *tweetbotQueue = nil;
 
 /* Shared {{{ */
 static NSString *NSStringURLEncode(NSString *string) {
@@ -72,9 +75,14 @@ static void TBInstapaperMobilize(NSString *pastie, TBInstapaperMobilizeCompletio
 	NSString *instapaper = [NSString stringWithFormat:@"http://instapaper.com/m?u=%@", NSStringURLEncode(pastie_raw)];
 	
 	NSURLRequest *request = [NSURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"http://is.gd/create.php?format=simple&url=%@", instapaper]]];
-	[NSURLConnection sendAsynchronousRequest:request queue:[NSOperationQueue currentQueue] completionHandler:^(NSURLResponse *response, NSData *data, NSError *error){
+	[NSURLConnection sendAsynchronousRequest:request queue:tweetbotQueue completionHandler:^(NSURLResponse *response, NSData *data, NSError *error){
+		NSLog(@"okay, this is the start of this block.");
+
 		NSString *replyString;
-		if (data == nil) goto inst;
+		if (data == nil) {
+			completion(instapaper);
+			return;			
+		}
 		replyString = [NSString stringWithUTF8String:(const char *)[data bytes]];
 		
 		if (replyString != nil) {
@@ -158,6 +166,7 @@ static UILabel *tweetbotCounter = nil;
 %group TBTweetbot
 %hook PTHTweetbotPostToolbarView
 - (id)initWithFrame:(CGRect)frame {
+	%log;
 	if ((self = %orig)) tweetbotCounter = MSHookIvar<UILabel *>(self, "_counterLabel");
 	return self;
 }
@@ -165,14 +174,11 @@ static UILabel *tweetbotCounter = nil;
 
 %hook PTHTweetbotPostController
 - (void)post:(id)sender {
+	%log;
+
 	PTHTweetbotPostDraft **draft = &MSHookIvar<PTHTweetbotPostDraft *>(self, "_draft");
 	NSString *text = [[*draft text] retain];
 	NSLog(@"text is %@ %i %i", text, [text length], [*draft length]);
-	
-	/*if ([text length] < [*draft length]) {
-		if ([text length] > 140)
-	else
-		if ([*draft length] > 140)*/
 	
 	if ([*draft length] > 140) {
 		NSString *before_pastie;
@@ -201,7 +207,13 @@ static UILabel *tweetbotCounter = nil;
 		}
 		
 		NSURLRequest *request = TBPastieRequest(text);
-		[NSURLConnection sendAsynchronousRequest:request queue:[NSOperationQueue currentQueue] completionHandler:^(NSURLResponse *response, NSData *data, NSError *error){
+		
+		tweetbotQueue = [[NSOperationQueue alloc] init];
+		NSLog(@"DID BLOCK COPY");
+		void (^lolblock)(NSURLResponse *, NSData *, NSError *) = Block_copy(^(NSURLResponse *response, NSData *data, NSError *error){
+			NSLog(@"this is before we attempt to access data.");
+			NSLog(@"data = %p", data);
+
 			if (data != nil) {
 				NSLog(@"paste: %@", [[response URL] absoluteString]);
 				
@@ -211,35 +223,54 @@ static UILabel *tweetbotCounter = nil;
 					if ([[*draft mediaArray] count] > 0) res = [res stringByAppendingString:@":"];
 					
 					[*draft setText:res];
-					[self post:sender];
+					
+					dispatch_sync(dispatch_get_main_queue(), ^{
+						[self post:sender];
+					});
 				});
 			}
 			
 			else {
-				[self dismissViewControllerAnimated:YES completion:^{
-					UIAlertView *failed = [[[%c(UIAlertView) alloc] init] autorelease];
-					[failed setTitle:@"TweetAmplius"];
-					[failed setMessage:@"Request to pastie.org has failed."];
-					[failed addButtonWithTitle:@"Dismiss"];
-					[failed show];
-				}];
+				NSLog(@"is it this?!");
+				
+				dispatch_sync(dispatch_get_main_queue(), ^{
+					[self dismissViewControllerAnimated:YES completion:^{
+						UIAlertView *failed = [[[%c(UIAlertView) alloc] init] autorelease];
+						[failed setTitle:@"TweetAmplius"];
+						[failed setMessage:@"Request to pastie.org has failed."];
+						[failed addButtonWithTitle:@"Dismiss"];
+						[failed show];
+					}];
+				});
 			}
-		}];
+		});
+		
+		NSLog(@"so ok we are sending the async request, right? %@ %@ %@", request, tweetbotQueue, lolblock);
+		[NSURLConnection sendAsynchronousRequest:request queue:tweetbotQueue completionHandler:lolblock];
+
+		NSLog(@"okay, so we just continue with this, right?");
+		//[tweetbotQueue release];
+		// FIXME <---------
 	}
 	else %orig;
 	
+	NSLog(@"right here we release text");
 	[text release];
+	NSLog(@"and quit -post:");
 }
 %end
 
 %hook PTHTweetbotDirectMessagesController
 - (id)initWithDirectMessageThread:(id)thread {
+	%log;
+
 	if ((self = %orig)) tweetbotDMController = self;
 	NSLog(@"tweetbotDMController = %@", tweetbotDMController);
 	return self;
 }
 
 - (void)loadView {
+	%log;
 	%orig;
 	
 	if (!isTweetbot3) {
@@ -249,6 +280,7 @@ static UILabel *tweetbotCounter = nil;
 }
 
 - (void)dealloc {
+	%log;
 	tweetbotDMController = nil;
 	
 	if (!isTweetbot3) {
@@ -260,6 +292,7 @@ static UILabel *tweetbotCounter = nil;
 }
 
 - (void)sendMessage:(UIButton *)sender {
+	%log;
 	PTHTweetbotPostDraft **draft = &MSHookIvar<PTHTweetbotPostDraft *>(self, "_draft");
 	PTHTweetbotUser *toUser = [[*draft toUser] retain];
 	NSString *text = [[*draft text] retain];
@@ -300,6 +333,7 @@ static UILabel *tweetbotCounter = nil;
 
 %hook PTHTweetbotDirectMessageTextView
 - (id)initWithFrame:(CGRect)frame {
+	%log;
 	if ((self = %orig)) {
 		if (isTweetbot3) {
 			tweetbotDMSender = MSHookIvar<UIButton *>(self, "_sendButton");
@@ -311,6 +345,7 @@ static UILabel *tweetbotCounter = nil;
 }
 
 - (void)dealloc {
+	%log;
 	if (isTweetbot3) {
 		tweetbotDMSender = nil;
 		tweetbotDMCounter = nil;
@@ -322,6 +357,7 @@ static UILabel *tweetbotCounter = nil;
 
 %hook UIButton
 - (void)setEnabled:(BOOL)enabled {
+	%log;
 	if (self == tweetbotDMSender && !enabled) {
 		if (![[MSHookIvar<UITextView *>(tweetbotDMController, isTweetbot3 ? "_messageTextView" : "_textView") text] isEqualToString:@""]) {
 			if ([self isEnabled]) return;
@@ -335,6 +371,7 @@ static UILabel *tweetbotCounter = nil;
 
 %hook UILabel
 - (void)setText:(NSString *)text {
+	%log;
 	if ([text intValue] < 0 && (self==tweetbotDMCounter || self==tweetbotCounter)) {
 		%orig(@"...");
 		return;
@@ -344,6 +381,7 @@ static UILabel *tweetbotCounter = nil;
 }
 
 - (void)setTextColor:(UIColor *)color {
+	%log;
 	if (self==tweetbotDMCounter || self==tweetbotCounter) {
 		if (CGColorSpaceGetModel(CGColorGetColorSpace([color CGColor])) == kCGColorSpaceModelMonochrome)
 			%orig;
