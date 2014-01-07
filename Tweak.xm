@@ -161,6 +161,8 @@ static UILabel *tweetbotDMCounter = nil;
 static UIButton *tweetbotDMSender = nil;
 static UILabel *tweetbotCounter = nil;
 
+static BOOL cancelledPost = NO;
+
 // ---- Tweetbot Post Hooks
 %group TBTweetbot
 %hook PTHTweetbotPostToolbarView
@@ -232,7 +234,11 @@ static UILabel *tweetbotCounter = nil;
 						[*draft setText:res];
 						
 						dispatch_sync(dispatch_get_main_queue(), ^{
-							[blockSelf post:nil];
+							if (!cancelledPost) {
+								[blockSelf post:nil];
+							}
+
+							cancelledPost = NO;
 						});
 					});
 				}
@@ -299,6 +305,12 @@ static UILabel *tweetbotCounter = nil;
 	}
 	
 	[text release];
+}
+
+- (void)ok:(id)sender {
+	%log;
+	cancelledPost = YES;
+	%orig;
 }
 %end
 
