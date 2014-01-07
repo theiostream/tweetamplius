@@ -75,26 +75,25 @@ static void TBInstapaperMobilize(NSString *pastie, TBInstapaperMobilizeCompletio
 	NSString *instapaper = [NSString stringWithFormat:@"http://instapaper.com/m?u=%@", NSStringURLEncode(pastie_raw)];
 	
 	NSURLRequest *request = [NSURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"http://is.gd/create.php?format=simple&url=%@", instapaper]]];
-	[NSURLConnection sendAsynchronousRequest:request queue:tweetbotQueue completionHandler:^(NSURLResponse *response, NSData *data, NSError *error){
-		NSLog(@"okay, this is the start of this block.");
+	NSURLResponse *response;
+	NSData *data = [NSURLConnection sendSynchronousRequest:request returningResponse:&response error:NULL];
 
-		NSString *replyString;
-		if (data == nil) {
-			completion(instapaper);
-			return;			
-		}
-		replyString = [NSString stringWithUTF8String:(const char *)[data bytes]];
-		
-		if (replyString != nil) {
-			NSLog(@"completion(replyString = %@)", replyString);
-			completion(replyString);
-		}
-		else {
-			inst:
-			NSLog(@"completion(instapaper = %@)", instapaper);
-			completion(instapaper);
-		}
-	}];
+	NSString *replyString;
+	if (data == nil) {
+		completion(instapaper);
+		return;			
+	}
+	replyString = [NSString stringWithUTF8String:(const char *)[data bytes]];
+	
+	if (replyString != nil) {
+		NSLog(@"completion(replyString = %@)", replyString);
+		completion(replyString);
+	}
+	else {
+		inst:
+		NSLog(@"completion(instapaper = %@)", instapaper);
+		completion(instapaper);
+	}
 }
 
 static void TBLimitTweet(NSUInteger limitIndex, NSString *text, NSString **limit, NSString **rest) {
@@ -166,7 +165,6 @@ static UILabel *tweetbotCounter = nil;
 %group TBTweetbot
 %hook PTHTweetbotPostToolbarView
 - (id)initWithFrame:(CGRect)frame {
-	%log;
 	if ((self = %orig)) tweetbotCounter = MSHookIvar<UILabel *>(self, "_counterLabel");
 	return self;
 }
@@ -174,8 +172,6 @@ static UILabel *tweetbotCounter = nil;
 
 %hook PTHTweetbotPostController
 - (void)post:(id)sender {
-	%log;
-
 	PTHTweetbotPostDraft **draft = &MSHookIvar<PTHTweetbotPostDraft *>(self, "_draft");
 	NSString *text = [[*draft text] retain];
 	NSLog(@"text is %@ %i %i", text, [text length], [*draft length]);
@@ -206,11 +202,13 @@ static UILabel *tweetbotCounter = nil;
 			[indicator release];
 		}
 		
-		NSURLRequest *request = TBPastieRequest(text);
-		
 		tweetbotQueue = [[NSOperationQueue alloc] init];
-		NSLog(@"DID BLOCK COPY");
-		void (^lolblock)(NSURLResponse *, NSData *, NSError *) = Block_copy(^(NSURLResponse *response, NSData *data, NSError *error){
+		NSURLRequest *request = TBPastieRequest(text);
+
+		__block PTHTweetbotPostController *blockSelf = self;
+		__block id blockSender = sender;
+		
+		[NSURLConnection sendAsynchronousRequest:request queue:tweetbotQueue completionHandler:^(NSURLResponse *response, NSData *data, NSError *error){
 			NSLog(@"this is before we attempt to access data.");
 			NSLog(@"data = %p", data);
 
@@ -225,7 +223,7 @@ static UILabel *tweetbotCounter = nil;
 					[*draft setText:res];
 					
 					dispatch_sync(dispatch_get_main_queue(), ^{
-						[self post:sender];
+						[blockSelf post:blockSender];
 					});
 				});
 			}
@@ -234,7 +232,7 @@ static UILabel *tweetbotCounter = nil;
 				NSLog(@"is it this?!");
 				
 				dispatch_sync(dispatch_get_main_queue(), ^{
-					[self dismissViewControllerAnimated:YES completion:^{
+					[blockSelf dismissViewControllerAnimated:YES completion:^{
 						UIAlertView *failed = [[[%c(UIAlertView) alloc] init] autorelease];
 						[failed setTitle:@"TweetAmplius"];
 						[failed setMessage:@"Request to pastie.org has failed."];
@@ -243,34 +241,24 @@ static UILabel *tweetbotCounter = nil;
 					}];
 				});
 			}
-		});
-		
-		NSLog(@"so ok we are sending the async request, right? %@ %@ %@", request, tweetbotQueue, lolblock);
-		[NSURLConnection sendAsynchronousRequest:request queue:tweetbotQueue completionHandler:lolblock];
+		}];
 
-		NSLog(@"okay, so we just continue with this, right?");
-		//[tweetbotQueue release];
-		// FIXME <---------
+		[tweetbotQueue release];
 	}
 	else %orig;
 	
-	NSLog(@"right here we release text");
 	[text release];
-	NSLog(@"and quit -post:");
 }
 %end
 
 %hook PTHTweetbotDirectMessagesController
 - (id)initWithDirectMessageThread:(id)thread {
-	%log;
-
 	if ((self = %orig)) tweetbotDMController = self;
 	NSLog(@"tweetbotDMController = %@", tweetbotDMController);
 	return self;
 }
 
 - (void)loadView {
-	%log;
 	%orig;
 	
 	if (!isTweetbot3) {
@@ -280,7 +268,6 @@ static UILabel *tweetbotCounter = nil;
 }
 
 - (void)dealloc {
-	%log;
 	tweetbotDMController = nil;
 	
 	if (!isTweetbot3) {
@@ -292,7 +279,6 @@ static UILabel *tweetbotCounter = nil;
 }
 
 - (void)sendMessage:(UIButton *)sender {
-	%log;
 	PTHTweetbotPostDraft **draft = &MSHookIvar<PTHTweetbotPostDraft *>(self, "_draft");
 	PTHTweetbotUser *toUser = [[*draft toUser] retain];
 	NSString *text = [[*draft text] retain];
@@ -333,7 +319,6 @@ static UILabel *tweetbotCounter = nil;
 
 %hook PTHTweetbotDirectMessageTextView
 - (id)initWithFrame:(CGRect)frame {
-	%log;
 	if ((self = %orig)) {
 		if (isTweetbot3) {
 			tweetbotDMSender = MSHookIvar<UIButton *>(self, "_sendButton");
@@ -345,7 +330,6 @@ static UILabel *tweetbotCounter = nil;
 }
 
 - (void)dealloc {
-	%log;
 	if (isTweetbot3) {
 		tweetbotDMSender = nil;
 		tweetbotDMCounter = nil;
@@ -357,7 +341,6 @@ static UILabel *tweetbotCounter = nil;
 
 %hook UIButton
 - (void)setEnabled:(BOOL)enabled {
-	%log;
 	if (self == tweetbotDMSender && !enabled) {
 		if (![[MSHookIvar<UITextView *>(tweetbotDMController, isTweetbot3 ? "_messageTextView" : "_textView") text] isEqualToString:@""]) {
 			if ([self isEnabled]) return;
@@ -371,7 +354,6 @@ static UILabel *tweetbotCounter = nil;
 
 %hook UILabel
 - (void)setText:(NSString *)text {
-	%log;
 	if ([text intValue] < 0 && (self==tweetbotDMCounter || self==tweetbotCounter)) {
 		%orig(@"...");
 		return;
@@ -381,7 +363,6 @@ static UILabel *tweetbotCounter = nil;
 }
 
 - (void)setTextColor:(UIColor *)color {
-	%log;
 	if (self==tweetbotDMCounter || self==tweetbotCounter) {
 		if (CGColorSpaceGetModel(CGColorGetColorSpace([color CGColor])) == kCGColorSpaceModelMonochrome)
 			%orig;

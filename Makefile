@@ -8,3 +8,6 @@ DMLonger_FILES = Tweak.xm
 DMLonger_FRAMEWORKS = CoreGraphics
 
 include $(THEOS_MAKE_PATH)/tweak.mk
+
+after-install::
+	install.exec "killall -9 Tweetbot Twitter &>/dev/null"
