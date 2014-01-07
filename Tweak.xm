@@ -83,14 +83,14 @@ static void TBInstapaperMobilize(NSString *pastie, TBInstapaperMobilizeCompletio
 		completion(instapaper);
 		return;			
 	}
-	replyString = [NSString stringWithUTF8String:(const char *)[data bytes]];
+	//replyString = [NSString stringWithUTF8String:(const char *)[data bytes]];
+	replyString = [[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] autorelease];
 	
 	if (replyString != nil) {
 		NSLog(@"completion(replyString = %@)", replyString);
 		completion(replyString);
 	}
 	else {
-		inst:
 		NSLog(@"completion(instapaper = %@)", instapaper);
 		completion(instapaper);
 	}
@@ -187,13 +187,14 @@ static UILabel *tweetbotCounter = nil;
 		NSLog(@"before_pastie = %@", before_pastie);
 		
 		// Unfortunately using this hooking way we are unable to completely cooperate with Tweetbot's "Post In Background" feature.
+		// (which is by default on Tweetbot 3.)
 		if (!isTweetbot3) {
 			[[self navigationItem] setRightBarButtonItem:[%c(UIBarButtonItem) rightSpinnerItemWithWidth:24.f]];
 		}
 		else {
 			// Since Tweetbot 3 no longer ships with a spinner, and we can't just push this into the background atm
 			// (well we could, but... :P) we'll just push this one.
-			UIActivityIndicatorView *indicator = [[%c(UIActivityIndicatorView) alloc] initWithFrame:CGRectMake(0, 0, 20, 20)];
+			UIActivityIndicatorView *indicator = [[%c(UIActivityIndicatorView) alloc] initWithFrame:CGRectMake(0, 0, 24, 24)];
 			[indicator setColor:[%c(UIColor) grayColor]];
 			UIBarButtonItem *barButton = [[%c(UIBarButtonItem) alloc] initWithCustomView:indicator];
 			[[self navigationItem] setRightBarButtonItem:barButton];
@@ -204,48 +205,98 @@ static UILabel *tweetbotCounter = nil;
 		
 		tweetbotQueue = [[NSOperationQueue alloc] init];
 		NSURLRequest *request = TBPastieRequest(text);
-
-		__block PTHTweetbotPostController *blockSelf = self;
-		__block id blockSender = sender;
 		
-		[NSURLConnection sendAsynchronousRequest:request queue:tweetbotQueue completionHandler:^(NSURLResponse *response, NSData *data, NSError *error){
-			NSLog(@"this is before we attempt to access data.");
-			NSLog(@"data = %p", data);
+		// This whole blockrepetitionshit is due to the weirdestfuck shit I've ever seen.
+		// Well, not really. Regardless, it's an interesting bug. I should call Dustin to check it out.
+		
+		// Anyway, what happens is that when you do Block_copy() on a block that has a reference to self or sender it'll crash Tweetbot 3.
+		// Meanwhile, if you attempt to call -post: with a __block sender on Tweetbot 2 we'll get a bad address and therefore fail.
+		// We don't need to worry about this on Tweetbot 3 because nil can be passed and it won't matter. regardless, it should be decent to pass the actual sender so we can unify the blocks.
+		// how to do that though, don't ask me.
 
-			if (data != nil) {
-				NSLog(@"paste: %@", [[response URL] absoluteString]);
-				
-				TBInstapaperMobilize([[response URL] absoluteString], ^(NSString *pastie_link){
-					NSLog(@"pastie_link = %@", pastie_link);
-					NSString *res = [before_pastie stringByAppendingString:[@"... " stringByAppendingString:pastie_link]];
-					if ([[*draft mediaArray] count] > 0) res = [res stringByAppendingString:@":"];
+		if (isTweetbot3) {
+			__block PTHTweetbotPostController *blockSelf = self;
+			
+			[NSURLConnection sendAsynchronousRequest:request queue:tweetbotQueue completionHandler:^(NSURLResponse *response, NSData *data, NSError *error){
+				NSLog(@"this is before we attempt to access data.");
+				NSLog(@"data = %p", data);
+
+				if (data != nil) {
+					NSLog(@"paste: %@", [[response URL] absoluteString]);
 					
-					[*draft setText:res];
+					TBInstapaperMobilize([[response URL] absoluteString], ^(NSString *pastie_link){
+						NSLog(@"pastie_link = %@", pastie_link);
+						NSString *res = [before_pastie stringByAppendingString:[@"... " stringByAppendingString:pastie_link]];
+						if ([[*draft mediaArray] count] > 0) res = [res stringByAppendingString:@":"];
+						
+						[*draft setText:res];
+						
+						dispatch_sync(dispatch_get_main_queue(), ^{
+							[blockSelf post:nil];
+						});
+					});
+				}
+				
+				else {
+					NSLog(@"is it this?!");
 					
 					dispatch_sync(dispatch_get_main_queue(), ^{
-						[blockSelf post:blockSender];
+						[blockSelf dismissViewControllerAnimated:YES completion:^{
+							UIAlertView *failed = [[[%c(UIAlertView) alloc] init] autorelease];
+							[failed setTitle:@"TweetAmplius"];
+							[failed setMessage:@"Request to pastie.org has failed."];
+							[failed addButtonWithTitle:@"Dismiss"];
+							[failed show];
+						}];
 					});
-				});
-			}
-			
-			else {
-				NSLog(@"is it this?!");
+				}
+			}];
+		}
+		
+		else {
+			[NSURLConnection sendAsynchronousRequest:request queue:tweetbotQueue completionHandler:^(NSURLResponse *response, NSData *data, NSError *error){
+				NSLog(@"this is before we attempt to access data.");
+				NSLog(@"data = %p", data);
+
+				if (data != nil) {
+					NSLog(@"paste: %@", [[response URL] absoluteString]);
+					
+					TBInstapaperMobilize([[response URL] absoluteString], ^(NSString *pastie_link){
+						NSLog(@"pastie_link = %@", pastie_link);
+						NSString *res = [before_pastie stringByAppendingString:[@"... " stringByAppendingString:pastie_link]];
+						if ([[*draft mediaArray] count] > 0) res = [res stringByAppendingString:@":"];
+						
+						[*draft setText:res];
+						
+						dispatch_sync(dispatch_get_main_queue(), ^{
+							[self post:sender];
+						});
+					});
+				}
 				
-				dispatch_sync(dispatch_get_main_queue(), ^{
-					[blockSelf dismissViewControllerAnimated:YES completion:^{
-						UIAlertView *failed = [[[%c(UIAlertView) alloc] init] autorelease];
-						[failed setTitle:@"TweetAmplius"];
-						[failed setMessage:@"Request to pastie.org has failed."];
-						[failed addButtonWithTitle:@"Dismiss"];
-						[failed show];
-					}];
-				});
-			}
-		}];
+				else {
+					NSLog(@"is it this?!");
+					
+					dispatch_sync(dispatch_get_main_queue(), ^{
+						[self dismissViewControllerAnimated:YES completion:^{
+							UIAlertView *failed = [[[%c(UIAlertView) alloc] init] autorelease];
+							[failed setTitle:@"TweetAmplius"];
+							[failed setMessage:@"Request to pastie.org has failed."];
+							[failed addButtonWithTitle:@"Dismiss"];
+							[failed show];
+						}];
+					});
+				}
+			}];
+		}
 
 		[tweetbotQueue release];
 	}
-	else %orig;
+	else {
+		NSLog(@"calling orig");
+		%orig;
+		NSLog(@"and crash.");
+	}
 	
 	[text release];
 }
