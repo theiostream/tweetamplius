@@ -161,7 +161,7 @@ static UILabel *tweetbotDMCounter = nil;
 static UIButton *tweetbotDMSender = nil;
 static UILabel *tweetbotCounter = nil;
 
-static BOOL cancelledPost = NO;
+static BOOL shouldPost = YES;
 
 // ---- Tweetbot Post Hooks
 %group TBTweetbot
@@ -234,11 +234,7 @@ static BOOL cancelledPost = NO;
 						[*draft setText:res];
 						
 						dispatch_sync(dispatch_get_main_queue(), ^{
-							if (!cancelledPost) {
-								[blockSelf post:nil];
-							}
-
-							cancelledPost = NO;
+							[blockSelf post:nil];
 						});
 					});
 				}
@@ -299,9 +295,8 @@ static BOOL cancelledPost = NO;
 		[tweetbotQueue release];
 	}
 	else {
-		NSLog(@"calling orig");
-		%orig;
-		NSLog(@"and crash.");
+		if (shouldPost) %orig;
+		shouldPost = YES;
 	}
 	
 	[text release];
@@ -309,7 +304,7 @@ static BOOL cancelledPost = NO;
 
 - (void)ok:(id)sender {
 	%log;
-	cancelledPost = YES;
+	shouldPost = NO;
 	%orig;
 }
 %end
