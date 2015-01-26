@@ -6,10 +6,10 @@
 %%%%%*/
 
 // COMPATIBILITY:
-// Twitter 5.x / 6.x (UI Bugs!)
+// Twitter 5.x / 6.0, 6.4+
 // Tweetbot 2.6.2 (untested on previous versions)
 // Tweetbot for iPad 2.6.2
-// Tweetbot 3.0 (NOT REALLY)
+// Tweetbot 3.0, 3.3+
 
 /*
 A small note on compatibility:
@@ -28,7 +28,10 @@ ever, Tweetbot for iPhone is awesome and the iPad version is getting there. :P
 /*================ SHARED */
 
 #define Twitter6x() ([[[[NSBundle mainBundle] infoDictionary] objectForKey:(NSString *)kCFBundleVersionKey] compare:@"6.0" options:NSNumericSearch] != NSOrderedAscending)
+#define Twitter64() ([[[[NSBundle mainBundle] infoDictionary] objectForKey:(NSString *)kCFBundleVersionKey] compare:@"6.4" options:NSNumericSearch] != NSOrderedAscending)
+
 static BOOL isTweetbot3 = NO;
+#define Tweetbot33() ([[[[NSBundle mainBundle] infoDictionary] objectForKey:(NSString *)kCFBundleVersionKey] compare:@"3.3" options:NSNumericSearch] != NSOrderedAscending)
 
 static NSOperationQueue *tweetbotQueue = nil;
 
@@ -144,6 +147,8 @@ static void TBLimitTweet(NSUInteger limitIndex, NSString *text, NSString **limit
 - (BOOL)isPosting;
 - (NSUInteger)length;
 - (NSArray *)mediaArray;
+- (NSArray *)media;
+- (NSArray *)$mediaArray;
 @end
 
 @interface PTHTweetbotDirectMessagesController : UIViewController
@@ -172,6 +177,14 @@ static BOOL shouldPost = YES;
 }
 %end
 
+%hook PTHTweetbotPostDraft
+%new(@@:)
+- (NSArray *)$mediaArray {
+	NSLog(@"tweetbot33 is %d", Tweetbot33());
+	return Tweetbot33() ? [self media] : [self mediaArray];
+}
+%end
+
 %hook PTHTweetbotPostController
 - (void)post:(id)sender {
 	PTHTweetbotPostDraft **draft = &MSHookIvar<PTHTweetbotPostDraft *>(self, "_draft");
@@ -182,8 +195,8 @@ static BOOL shouldPost = YES;
 		NSString *before_pastie;
 		
 		NSInteger limit = 116;
-		limit -= 20*([[*draft mediaArray] count]) + 3;
-		NSLog(@"limit is %i (%i)", limit, [[*draft mediaArray] count]);
+		limit -= 20*([[*draft $mediaArray] count]) + 3;
+		NSLog(@"limit is %i (%i)", limit, [[*draft $mediaArray] count]);
 		
 		TBLimitTweet(limit, text, &before_pastie, NULL);
 		NSLog(@"before_pastie = %@", before_pastie);
@@ -229,7 +242,7 @@ static BOOL shouldPost = YES;
 					TBInstapaperMobilize([[response URL] absoluteString], ^(NSString *pastie_link){
 						NSLog(@"pastie_link = %@", pastie_link);
 						NSString *res = [before_pastie stringByAppendingString:[@"... " stringByAppendingString:pastie_link]];
-						if ([[*draft mediaArray] count] > 0) res = [res stringByAppendingString:@":"];
+						if ([[*draft $mediaArray] count] > 0) res = [res stringByAppendingString:@":"];
 						
 						[*draft setText:res];
 						
@@ -266,7 +279,7 @@ static BOOL shouldPost = YES;
 					TBInstapaperMobilize([[response URL] absoluteString], ^(NSString *pastie_link){
 						NSLog(@"pastie_link = %@", pastie_link);
 						NSString *res = [before_pastie stringByAppendingString:[@"... " stringByAppendingString:pastie_link]];
-						if ([[*draft mediaArray] count] > 0) res = [res stringByAppendingString:@":"];
+						if ([[*draft $mediaArray] count] > 0) res = [res stringByAppendingString:@":"];
 						
 						[*draft setText:res];
 						
@@ -303,7 +316,6 @@ static BOOL shouldPost = YES;
 }
 
 - (void)ok:(id)sender {
-	%log;
 	shouldPost = NO;
 	%orig;
 }
@@ -449,6 +461,7 @@ static BOOL theiostream_in_the_house = NO;
 - (void)sendFromAccount:(id)account;
 - (NSString *)text;
 - (NSInteger)remainingCharactersForAccount:(id)account;
+- (NSInteger)remainingCharacters;
 - (void)setDirectMessageUser:(id)user;
 - (id)directMessageUser;
 - (int)attachmentsLengthForAccount:(id)account;
@@ -495,7 +508,6 @@ static BOOL theiostream_in_the_house = NO;
 
 %hook T1ComposeViewController
 - (id)init {
-	%log;
 	if ((self = %orig)) composeViewController = (UIViewController *)self;
 	return self;
 }
@@ -503,22 +515,41 @@ static BOOL theiostream_in_the_house = NO;
 - (void)viewDidLoad {
 	%orig;
 	
-	sendButton = MSHookIvar<UIBarButtonItem *>(self, Twitter6x() ? "sendButtonItem" : "sendButton");
+	const char *ivar;
+	if (Twitter64()) ivar = "_sendButtonItem";
+	else if (Twitter6x()) ivar = "sendButtonItem";
+	else ivar = "sendButton";
+
+	sendButton = MSHookIvar<UIBarButtonItem *>(self, ivar);
 	[sendButton setEnabled:NO];
+
+	NSLog(@"lbl? %@", MSHookIvar<UILabel *>(self, "_remainingCharactersLabel"));
+}
+
+- (void)viewDidAppear:(BOOL)animated {
+	%orig;
+	counterLabel = MSHookIvar<UILabel *>(self, "_remainingCharactersLabel");
+}
+- (void)viewDidDisappear:(BOOL)animated {
+	%orig;
+	counterLabel = nil;
 }
 
 - (void)_setupCounter {
 	%orig;
 	counterLabel = MSHookIvar<UILabel *>(self, "remainingCharactersLabel");
 }
-
 - (void)_setupPadCounter {
-	%log;
 	%orig;
 	counterLabel = MSHookIvar<UILabel *>(self, "remainingCharactersLabel");
 }
 
 - (void)_textDidChange {
+	theiostream_in_the_house = YES;
+	%orig;
+	theiostream_in_the_house = NO;
+}
+- (void)textDidChange {
 	theiostream_in_the_house = YES;
 	%orig;
 	theiostream_in_the_house = NO;
@@ -535,6 +566,7 @@ static BOOL theiostream_in_the_house = NO;
 %hook UIBarButtonItem
 - (void)setEnabled:(BOOL)enabled {
 	if (!enabled) {
+		NSLog(@"self %@ sendButton %@", self, sendButton);
 		if (self == dmSendButton) {
 			if (![[MSHookIvar<UITextView *>(conversationViewController, "composeTextView") text] isEqualToString:@""]) {
 				if ([dmSendButton isEnabled]) return;
@@ -542,9 +574,14 @@ static BOOL theiostream_in_the_house = NO;
 			}
 		}
 		else if (self == sendButton) {
-			if (![[MSHookIvar<UITextView *>(composeViewController, "textView") text] isEqualToString:@""]) {
+			UITextView *textView = Twitter64() ?
+				MSHookIvar<UITextView *>(MSHookIvar<id>(MSHookIvar<id>(composeViewController, "_composeView"), "_richTextView"), "_textView") :
+				MSHookIvar<UITextView *>(composeViewController, "textView");
+			NSLog(@"textView: %@", textView);
+			
+			if (![[textView text] isEqualToString:@""]) {
 				if ([sendButton isEnabled]) return;
-				else { %orig(YES); return; }
+				else { %orig(YES); NSLog(@"did %%orig(YES)"); return; }
 			}
 		}
 	}
@@ -555,8 +592,10 @@ static BOOL theiostream_in_the_house = NO;
 
 %hook UILabel
 - (void)setText:(NSString *)text {
+	NSLog(@"self %@ counterLabel %@", self, counterLabel);
 	if (self == counterLabel || self == dmCounterLabel) {
 		NSInteger remaining = [text intValue];
+		NSLog(@"hihihi label rm %i", remaining);
 		%orig(remaining<0 ? @"..." : text);
 	}
 	else %orig;
@@ -575,7 +614,6 @@ static BOOL theiostream_in_the_house = NO;
 
 %hook TwitterComposition
 - (void)sendFromAccount:(id)account {
-	%log;
 	NSString *text = [self text];
 	NSLog(@"TEXT: %@", text);
 	theiostream_in_the_house = YES;
@@ -642,6 +680,82 @@ static BOOL theiostream_in_the_house = NO;
 }
 
 - (NSInteger)remainingCharactersForAccount:(id)account {
+	return theiostream_in_the_house ? %orig : 0;
+}
+%end
+
+%hook TFNTwitterComposition
+- (void)sendFromAccount:(id)account {
+	NSString *text = [self text];
+	NSLog(@"TEXT: %@", text);
+	theiostream_in_the_house = YES;
+	//NSInteger remaining = [self remainingCharactersForAccount:account];// + [self attachmentsLengthForAccount:account];
+	NSInteger remaining = [self remainingCharacters];
+	NSLog(@"Remaining = %d (textlen = %d)", remaining, [text length]);
+	theiostream_in_the_house = NO;
+	
+	if ([self isDirectMessage]) {
+		if (remaining < 0) {
+			NSString *limited, *rest;
+			TBLimitTweet(140, text, &limited, &rest);
+			
+			[self setText:limited];
+			[self sendFromAccount:account];
+			
+			TwitterComposition *composition = [[%c(TFNTwitterComposition) alloc] initWithInitialText:rest];
+			[composition setDirectMessageUser:[self directMessageUser]];
+			[composition sendFromAccount:account];
+			[composition release];
+			
+			[self setText:[NSString string]];
+		}
+		else %orig;
+	}
+	
+	else {
+		NSLog(@"HI TWITTER");
+		if (remaining < 0) {
+			NSString *limited;
+
+			NSInteger limit = 116;
+			limit -= 20*([[self attachments] count]) + 3;
+			
+			//TBLimitTweet(([self attachment] ? 93 : 116) - (Twitter6x() ? 3 : 0), text, &limited, NULL);
+			TBLimitTweet(limit, text, &limited, NULL);
+			
+			NSURLRequest *request = TBPastieRequest(text);
+			[NSURLConnection sendAsynchronousRequest:request queue:[NSOperationQueue currentQueue] completionHandler:^(NSURLResponse *response, NSData *data, NSError *error){
+				NSLog(@"k %@", [[response URL] absoluteString]);
+				if (data != nil) {
+					TBInstapaperMobilize([[response URL] absoluteString], ^(NSString *pastie_link){
+						NSLog(@"pastie_link = %@", pastie_link);
+						NSString *res = [limited stringByAppendingString:[@"... " stringByAppendingString:pastie_link]];
+						NSLog(@"got res! %@ %d", res, [res length]);
+						if ((int)[[self attachments] count] > 0) res = [res stringByAppendingString:@":"];
+						[self setText:res];
+						
+						[self sendFromAccount:account];
+					});
+				}
+				
+				else {
+					UIAlertView *failed = [[[%c(UIAlertView) alloc] init] autorelease];
+					[failed setTitle:@"TweetAmplius"];
+					[failed setMessage:@"Request to pastie.org has failed."];
+					[failed addButtonWithTitle:@"Dismiss"];
+					[failed show];
+				}
+			}];
+		}
+		else %orig;
+	}
+}
+
+- (BOOL)isWorthSending {
+	return ![[self text] isEqualToString:@""];
+}
+
+- (NSInteger)remainingCharacters {
 	return theiostream_in_the_house ? %orig : 0;
 }
 %end
